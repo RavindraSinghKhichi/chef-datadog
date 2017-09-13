@@ -48,7 +48,13 @@ when 'debian'
     uri node['datadog']['aptrepo_agent6']
     distribution node['datadog']['aptrepo_dist_agent6']
     components ['main']
-    action :add
+    if node['datadog']['agent6']
+      action :add
+    else
+      # make sure the repo is removed if we don't want to use agent6, to avoid automatic upgrade
+      # to agent6 if the package name is the same
+      action :remove
+    end
   end
 
 when 'rhel', 'fedora'

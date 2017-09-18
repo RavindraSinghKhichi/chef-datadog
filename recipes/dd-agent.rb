@@ -123,14 +123,9 @@ if node['datadog']['agent6'] || node['datadog']['generate_datadog_yaml']
         extra_config[k] = v
       end
       {
-        agent_config: extra_config.merge({
-          api_key: Chef::Datadog.api_key(node),
-          dd_url: node['datadog']['url'],
-          hostname: node['datadog']['hostname'],
-          log_level: node['datadog']['log_level'],
-          additional_endpoints: additional_endpoints,
-          use_v2_api: node['datadog']['use_v2_api']
-        })
+        extra_config: extra_config,
+        api_key: Chef::Datadog.api_key(node),
+        additional_endpoints: additional_endpoints
       }
     end
 

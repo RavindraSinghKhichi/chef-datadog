@@ -9,7 +9,8 @@ end
 
 action :add do
   Chef::Log.debug "Adding monitoring for #{new_resource.name}"
-  template ::File.join(node['datadog']['config_dir'], 'conf.d', "#{new_resource.name}.yaml") do
+  config_dir = node['datadog']['agent6'] ? node['datadog']['agent6_config_dir'] : node['datadog']['config_dir']
+  template ::File.join(config_dir, 'conf.d', "#{new_resource.name}.yaml") do
     if node['platform_family'] == 'windows'
       owner 'Administrators'
       rights :full_control, 'Administrators'
@@ -31,9 +32,8 @@ action :add do
     notifies :restart, 'service[datadog-agent]', :delayed if node['datadog']['agent_start']
   end
 
-  agent_service_name = node['datadog']['agent6'] ? "datadog-agent6" : node['datadog']['agent_name']
   service 'datadog-agent' do
-    service_name agent_service_name
+    service_name node['datadog']['agent_name']
     # HACK: the restart can fail when we hit systemd's restart limits (by default, 5 starts every 10 seconds)
     # To workaround this, retry once after 5 seconds, and a second time after 10 seconds
     retries 2
@@ -42,7 +42,8 @@ action :add do
 end
 
 action :remove do
-  confd_dir = ::File.join(node['datadog']['config_dir'], 'conf.d')
+  config_dir = node['datadog']['agent6'] ? node['datadog']['agent6_config_dir'] : node['datadog']['config_dir']
+  confd_dir = ::File.join(config_dir, 'conf.d')
   Chef::Log.debug "Removing #{new_resource.name} from #{confd_dir}"
   file ::File.join(confd_dir, "#{new_resource.name}.yaml") do
     action :delete
@@ -50,8 +51,7 @@ action :remove do
     notifies :restart, 'service[datadog-agent]', :delayed if node['datadog']['agent_start']
   end
 
-  agent_service_name = node['datadog']['agent6'] ? "datadog-agent6" : node['datadog']['agent_name']
   service 'datadog-agent' do
-    service_name agent_service_name
+    service_name node['datadog']['agent_name']
   end
 end

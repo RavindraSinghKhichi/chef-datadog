@@ -42,17 +42,17 @@ when 'debian'
     action :add
   end
 
-  apt_repository 'datadog-agent6' do
+  apt_repository 'datadog-beta' do
     keyserver 'hkp://keyserver.ubuntu.com:80'
-    key '382E94DE'
-    uri node['datadog']['aptrepo_agent6']
-    distribution node['datadog']['aptrepo_dist_agent6']
+    key 'C7A7DA52'
+    uri node['datadog']['agent6_aptrepo']
+    distribution node['datadog']['agent6_aptrepo_dist']
     components ['main']
     if node['datadog']['agent6']
       action :add
     else
-      # make sure the repo is removed if we don't want to use agent6, to avoid automatic upgrade
-      # to agent6 if the package name is the same
+      # make sure the repo is removed if we don't want to use agent6, to avoid automatic upgrades
+      # to agent6
       action :remove
     end
   end

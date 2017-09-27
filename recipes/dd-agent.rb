@@ -38,71 +38,101 @@ end
 agent_enable = node['datadog']['agent_enable'] ? :enable : :disable
 # Set the correct Agent startup action
 agent_start = node['datadog']['agent_start'] ? :start : :stop
-# Set the correct config file
-agent_config_file = ::File.join(node['datadog']['config_dir'], 'datadog.conf')
-agent6_config_file = ::File.join(node['datadog']['config_dir'], 'datadog.yaml')
-
-# Make sure the config directory exists
-directory node['datadog']['config_dir'] do
-  if is_windows
-    owner 'Administrators'
-    rights :full_control, 'Administrators'
-    inherits false
-  else
-    owner 'dd-agent'
-    group 'root'
-    mode '755'
-  end
-end
 
 #
 # Configures a basic agent
 # To add integration-specific configurations, add 'datadog::config_name' to
 # the node's run_list and set the relevant attributes
 #
+if node['datadog']['agent6']
+  # FIXME: with the agent6, we still need the agent5 conf file in duplicate in /etc/datadog-agent/trace-agent.conf
+  #        and /etc/datadog-agent/process-agent.conf for the trace and process agents.
+  #        Remove them when these agents can read from datadog.yaml.
+  trace_agent_config_file = ::File.join(node['datadog']['agent6_config_dir'], 'trace-agent.conf')
+  process_agent_config_file = ::File.join(node['datadog']['agent6_config_dir'], 'process-agent.conf')
 
-# FIXME: with the agent6, we still need the agent5 conf file in /etc/dd-agent/datadog.conf for the trace-agent.
-#        Remove it when the trace-agent can handle datadog.yaml
-template agent_config_file do # rubocop:disable Metrics/BlockLength
-  def template_vars # rubocop:disable Metrics/AbcSize
-    api_keys = [Chef::Datadog.api_key(node)]
-    dd_urls = [node['datadog']['url']]
-    node['datadog']['extra_endpoints'].each do |_, endpoint|
-      next unless endpoint['enabled']
-      api_keys << endpoint['api_key']
-      dd_urls << if endpoint['url']
-                   endpoint['url']
-                 else
-                   node['datadog']['url']
-                 end
+  template trace_agent_config_file do # rubocop:disable Metrics/BlockLength
+    def conf_template_vars
+      {
+        :api_keys => [Chef::Datadog.api_key(node)],
+        :dd_urls => [node['datadog']['url']]
+      }
     end
-    {
-      :api_keys => api_keys,
-      :dd_urls => dd_urls
-    }
-  end
-  if is_windows
-    owner 'Administrators'
-    rights :full_control, 'Administrators'
-    inherits false
-  else
-    owner 'dd-agent'
-    group 'root'
-    mode '640'
-  end
-  variables(
-    if respond_to?(:lazy)
-      lazy { template_vars }
+    variables(
+      if respond_to?(:lazy)
+        lazy { conf_template_vars }
+      else
+        conf_template_vars
+      end
+    )
+    if is_windows
+      owner 'Administrators'
+      rights :full_control, 'Administrators'
+      inherits false
     else
-      template_vars
+      owner 'dd-agent'
+      group 'dd-agent'
+      mode '640'
     end
-  )
-  sensitive true if Chef::Resource.instance_methods(false).include?(:sensitive)
-end
+    source 'datadog.conf.erb'
+    sensitive true if Chef::Resource.instance_methods(false).include?(:sensitive)
+    notifies :restart, 'service[datadog-agent]', :delayed unless node['datadog']['agent_start'] == false
+  end
 
-if node['datadog']['agent6'] || node['datadog']['generate_datadog_yaml']
-  template agent6_config_file do
-    def template_vars
+  template process_agent_config_file do # rubocop:disable Metrics/BlockLength
+    def conf_template_vars
+      {
+        :api_keys => [Chef::Datadog.api_key(node)],
+        :dd_urls => [node['datadog']['url']]
+      }
+    end
+    variables(
+      if respond_to?(:lazy)
+        lazy { conf_template_vars }
+      else
+        conf_template_vars
+      end
+    )
+    if is_windows
+      owner 'Administrators'
+      rights :full_control, 'Administrators'
+      inherits false
+    else
+      owner 'dd-agent'
+      group 'dd-agent'
+      mode '640'
+    end
+    source 'datadog.conf.erb'
+    sensitive true if Chef::Resource.instance_methods(false).include?(:sensitive)
+    notifies :restart, 'service[datadog-agent]', :delayed unless node['datadog']['agent_start'] == false
+  end
+
+  # With agent6, the process-agent and trace-agent are enabled as long-running checks
+  # TODO: on agent6, we can't really make the trace-agent _not_ run yet
+  datadog_monitor 'apm' do
+    instances [{}]
+    use_integration_template true
+    if node['datadog']['enable_trace_agent'].is_a?(TrueClass)
+      action :add
+    else
+      action :remove
+    end
+  end
+  process_agent_init_config = { enabled: node['datadog']['enable_process_agent'] }
+  datadog_monitor 'process_agent' do
+    init_config process_agent_init_config
+    instances [{}]
+    use_integration_template true
+    if node['datadog']['enable_process_agent'].is_a?(TrueClass) || node['datadog']['enable_process_agent'].is_a?(FalseClass)
+      action :add
+    else
+      action :remove
+    end
+  end
+
+  agent6_config_file = ::File.join(node['datadog']['agent6_config_dir'], 'datadog.yaml')
+  template agent6_config_file do # rubocop:disable Metrics/BlockLength
+    def template_vars # rubocop:disable Metrics/AbcSize
       additional_endpoints = {}
       node['datadog']['extra_endpoints'].each do |_, endpoint|
         next unless endpoint['enabled']
@@ -141,12 +171,64 @@ if node['datadog']['agent6'] || node['datadog']['generate_datadog_yaml']
     )
     sensitive true if Chef::Resource.instance_methods(false).include?(:sensitive)
   end
+else
+  # Agent 5 and lower
+
+  # Make sure the config directory exists for Agent 5
+  directory node['datadog']['config_dir'] do
+    if is_windows
+      owner 'Administrators'
+      rights :full_control, 'Administrators'
+      inherits false
+    else
+      owner 'dd-agent'
+      group 'root'
+      mode '755'
+    end
+  end
+
+  agent_config_file = ::File.join(node['datadog']['config_dir'], 'datadog.conf')
+  template agent_config_file do # rubocop:disable Metrics/BlockLength
+    def template_vars # rubocop:disable Metrics/AbcSize
+      api_keys = [Chef::Datadog.api_key(node)]
+      dd_urls = [node['datadog']['url']]
+      node['datadog']['extra_endpoints'].each do |_, endpoint|
+        next unless endpoint['enabled']
+        api_keys << endpoint['api_key']
+        dd_urls << if endpoint['url']
+                     endpoint['url']
+                   else
+                     node['datadog']['url']
+                   end
+      end
+      {
+        :api_keys => api_keys,
+        :dd_urls => dd_urls
+      }
+    end
+    if is_windows
+      owner 'Administrators'
+      rights :full_control, 'Administrators'
+      inherits false
+    else
+      owner 'dd-agent'
+      group 'root'
+      mode '640'
+    end
+    variables(
+      if respond_to?(:lazy)
+        lazy { template_vars }
+      else
+        template_vars
+      end
+    )
+    sensitive true if Chef::Resource.instance_methods(false).include?(:sensitive)
+  end
 end
 
-agent_service_name = node['datadog']['agent6'] ? "datadog-agent6" : node['datadog']['agent_name']
 # Common configuration
 service 'datadog-agent' do
-  service_name agent_service_name
+  service_name node['datadog']['agent_name']
   action [agent_enable, agent_start]
   if is_windows
     supports :restart => true, :start => true, :stop => true
